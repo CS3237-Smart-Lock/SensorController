@@ -1,20 +1,16 @@
 #include <Wire.h>
 #include <SparkFun_APDS9960_mod.h>
 #include "esp_timer.h"
-#define BUTTON_PIN 14
-
-volatile bool button_pressed = false;
-
-
-
+#include <ArduinoJson.h>
+#include <base64.h>
 #include <WiFi.h>
 #include <ArduinoWebsockets.h>
 #include "soc/soc.h" //disable brownout problems
 #include "soc/rtc_cntl_reg.h"  //disable brownout problems
 #include "driver/gpio.h"
-
 #define BUTTON_PIN 14
 
+volatile bool button_pressed = false;
 
 char * url = "ws://172.20.10.4:12345/";
 
@@ -169,58 +165,68 @@ void loop() {
 
   if(button_pressed) {
      
-      if (begin) {
+      /*if (begin) {
         Serial.println("Input password:");
         begin = 0;
-      }
+      }*/
 
       handleGesture();
-
+      /*
       if (!input and pw_pos == 4) {
         sendPW();
       }
+      */
   } else {
     //Serial.println("Button not activated yet");
   }
   
 }
 
+void sendGestureJson(const String& direction) {
+  // Encode the direction in base64
+  String encodedData = base64::encode(direction);
 
+  // Create JSON document
+  StaticJsonDocument<256> jsonDoc;
+  jsonDoc["type"] = "gesture";
+  jsonDoc["data"] = encodedData;
+
+  // Convert JSON to string
+  String jsonString;
+  serializeJson(jsonDoc, jsonString);
+
+  // Send JSON over websocket
+  client.send(jsonString);
+}
+
+// Modified handleGesture to send JSON message
 void handleGesture() {
   if (apds.isGestureAvailable()) {
     int gest = apds.readGesture();
     switch (gest) {
       case DIR_LEFT:
         Serial.println("1 LEFT");
+        sendGestureJson("left");
         break;
       case DIR_RIGHT:
         Serial.println("2 RIGHT");
+        sendGestureJson("right");
         break;
       case DIR_UP:
         Serial.println("3 UP");
+        sendGestureJson("up");
         break;
       case DIR_DOWN:
         Serial.println("4 DOWN");
-        break;
-      case DIR_NEAR:
-        Serial.println("5 NEAR");
-        break;
-      case DIR_FAR:
-        Serial.println("6 FAR");
+        sendGestureJson("down");
         break;
       default:
-        //Serial.println("NOT DETECTED");
         return;
-    }
-    client.send(String(gest));
-    pw_input[pw_pos++] = gest;
-    if (pw_pos == 4) {
-      input = 0;
     }
   }
 }
 
-void sendPW() {
+/*void sendPW() {
   //fill in with packet sending stuff
   esp_timer_stop(timer);
   Serial.print("Your input: ");
@@ -241,3 +247,4 @@ void handleReply(bool pwcorrect) {
   if (pwcorrect) Serial.println("Unlocking");  //print statements could be replaced with led feedback
   else Serial.println("Try again!");
 }
+*/
