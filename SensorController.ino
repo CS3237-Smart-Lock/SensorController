@@ -8,11 +8,18 @@
 #include "soc/soc.h" //disable brownout problems
 #include "soc/rtc_cntl_reg.h"  //disable brownout problems
 #include "driver/gpio.h"
+
+#include <hd44780.h>
+#include <hd44780ioClass/hd44780_I2Cexp.h>
+
 #define BUTTON_PIN 14
 
 volatile bool button_pressed = false;
-
+volatile bool timer_has_run_out = false;
 char * url = "ws://172.20.10.4:12345/";
+volatile int64_t start_time = 0;
+
+hd44780_I2Cexp lcd;  // Declare lcd object: auto-locates address
 
 using namespace websockets;
 WebsocketsClient client;
@@ -53,35 +60,29 @@ esp_err_t init_wifi() {
   return ESP_OK;
 };
 
-
+void setup_lcd() {
+  
+  int status = lcd.begin(16, 2);  // Adjust to 20,4 if using a 20x4 display
+  delay(500);
+  if (status) {                   // Check if initialization was successful
+    Serial.println("LCD initialization failed");
+    return;
+  }
+  lcd.backlight();
+  
+  lcd.setCursor(0, 0);  
+  lcd.print("Hello, ESP32!");
+}
 
 SparkFun_APDS9960 apds = SparkFun_APDS9960();
 #define APDS9960_INT 23
-int isr_flag = 0;
-int pw_input[4] = { 0, 0, 0, 0 };
-int pw_pos = 0;
-bool input = 0;
-bool begin = 1;
 
-/* Direction definitions */
-//   0  DIR_NONE,
-//   1  DIR_LEFT,
-//   2  DIR_RIGHT,
-//   3  DIR_UP,
-//   4  DIR_DOWN,
-//   5  DIR_NEAR,
-//   6  DIR_FAR,
-//   7  DIR_ALL
+
 esp_timer_handle_t timer;
 volatile bool timer_start = false;
 
  void onTimer(void* arg){  
-    Serial.println("Timer has run out");
-    client.send("Timer has run out");
-    button_pressed = false;
-    pw_pos = 0;
-    input = 1;
-    begin = 1;
+    timer_has_run_out = true;
  }
 
  void IRAM_ATTR isr_in() {
@@ -113,13 +114,6 @@ void apds_setup() {
   }
 
     if (apds.enableGestureSensor(false) //true to enable interrupt
-      /* calibration values */
-      // && apds.setGestureEnterThresh(40)
-      // && apds.setGestureExitThresh(20)
-      // && apds.setGestureGain(GGAIN_4X)
-      // && apds.setGestureLEDDrive(LED_DRIVE_100MA) //max
-      // && apds.setGestureWaitTime(GWTIME_8_4MS)
-      // && apds.wireWriteDataByte(APDS9960_GPULSE, 0xD4)  // 32us, 20 pulses 0b11,010100
   ) {
     Serial.println(F("Gesture sensor is now running"));
   } else {
@@ -138,7 +132,8 @@ void setup() {
   init_wifi();
 
   // attachInterrupt(APDS9960_INT, interruptRoutine, FALLING);
-
+  //setting up lcd
+  setup_lcd();
   //setting up the apds sensor
   apds_setup();
 
@@ -156,26 +151,33 @@ void loop() {
 
   client.poll();
 
+  if(timer_has_run_out) {
+    Serial.println("Timer has run out");
+    client.send("Timer has run out");
+    button_pressed = false;
+    timer_has_run_out = false;
+  }
+
   if(timer_start){
     Serial.println("Starting the timer");
     esp_timer_start_once(timer, 10 * 1000000);
+    start_time = esp_timer_get_time();
     timer_start = false;
-    client.send("Starting attempt: ");
+    lcd.clear();
+    lcd.setCursor(0,0);
+    lcd.print("Starting attempt");
+    //client.send("Starting attempt: ");
   }
 
   if(button_pressed) {
-     
-      /*if (begin) {
-        Serial.println("Input password:");
-        begin = 0;
-      }*/
 
       handleGesture();
-      /*
-      if (!input and pw_pos == 4) {
-        sendPW();
-      }
-      */
+
+      //create the countdown
+      int64_t time_passed = (esp_timer_get_time()-start_time)/1000000; 
+      lcd.setCursor(0,1);
+      lcd.print(String(time_passed));
+      
   } else {
     //Serial.println("Button not activated yet");
   }
@@ -225,26 +227,3 @@ void handleGesture() {
     }
   }
 }
-
-/*void sendPW() {
-  //fill in with packet sending stuff
-  esp_timer_stop(timer);
-  Serial.print("Your input: ");
-  for (int i = 0; i < pw_pos; i++) {
-    Serial.print(pw_input[i]);
-  }
-  Serial.println();
-  pw_pos = 0;
-  input = 1;
-  begin = 1;
-  button_pressed = false;
-  client.send("Attempted password: " + String(pw_input[0]) + String(pw_input[1]) + String(pw_input[2]) + String(pw_input[3]));
-}
-
-void handleReply(bool pwcorrect) {
-  //polling/interrupt to handle reply from backend
-  //fill in with packet parsing stuff
-  if (pwcorrect) Serial.println("Unlocking");  //print statements could be replaced with led feedback
-  else Serial.println("Try again!");
-}
-*/
