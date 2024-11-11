@@ -9,11 +9,12 @@
 #include <Wire.h>
 #include <base64.h>
 
+
 #define BUTTON_PIN 14
 
-volatile bool button_pressed = false;
+#define WEBSOCKET_URL "ws://192.168.0.75:12345/"
 
-char *url = "ws://172.20.10.4:12345/";
+volatile bool button_pressed = false;
 
 using namespace websockets;
 WebsocketsClient client;
@@ -62,8 +63,6 @@ esp_err_t connect_to_websocket() {
 SparkFun_APDS9960 apds = SparkFun_APDS9960();
 #define APDS9960_INT 23
 int isr_flag = 0;
-int pw_input[4] = {0, 0, 0, 0};
-int pw_pos = 0;
 bool input = 0;
 bool begin = 1;
 
@@ -81,9 +80,7 @@ volatile bool timer_start = false;
 
 void onTimer(void *arg) {
   Serial.println("Timer has run out");
-  client.send("Timer has run out");
   button_pressed = false;
-  pw_pos = 0;
   input = 1;
   begin = 1;
 }
@@ -155,30 +152,21 @@ void setup() {
 
 void loop() {
 
-  client.poll();
+  // Keep alive websocket
+  if (!client.available()) {
+    connect_to_websocket();
+  } else {
+    client.poll();
+  }
 
   if (timer_start) {
     Serial.println("Starting the timer");
     esp_timer_start_once(timer, 10 * 1000000);
     timer_start = false;
-    client.send("Starting attempt: ");
   }
 
   if (button_pressed) {
-
-    /*if (begin) {
-      Serial.println("Input password:");
-      begin = 0;
-    }*/
-
     handleGesture();
-    /*
-    if (!input and pw_pos == 4) {
-      sendPW();
-    }
-    */
-  } else {
-    // Serial.println("Button not activated yet");
   }
 }
 
@@ -225,27 +213,3 @@ void handleGesture() {
     }
   }
 }
-
-/*void sendPW() {
-  //fill in with packet sending stuff
-  esp_timer_stop(timer);
-  Serial.print("Your input: ");
-  for (int i = 0; i < pw_pos; i++) {
-    Serial.print(pw_input[i]);
-  }
-  Serial.println();
-  pw_pos = 0;
-  input = 1;
-  begin = 1;
-  button_pressed = false;
-  client.send("Attempted password: " + String(pw_input[0]) + String(pw_input[1])
-+ String(pw_input[2]) + String(pw_input[3]));
-}
-
-void handleReply(bool pwcorrect) {
-  //polling/interrupt to handle reply from backend
-  //fill in with packet parsing stuff
-  if (pwcorrect) Serial.println("Unlocking");  //print statements could be
-replaced with led feedback else Serial.println("Try again!");
-}
-*/
