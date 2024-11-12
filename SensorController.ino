@@ -14,6 +14,8 @@
 
 #define BUTTON_PIN 14
 
+#define WEBSOCKET_URL "ws://192.168.0.75:12345/"
+
 volatile bool button_pressed = false;
 volatile bool timer_has_run_out = false;
 char * url = "ws://172.20.10.4:12345/";
@@ -34,31 +36,42 @@ void onMessageCallback(WebsocketsMessage message) {
 
 int state;
 
-esp_err_t init_wifi() {
-  WiFi.begin("iPhone von Luis", "12345678");
+esp_err_t init_wifi(int maxRetries = 20) {
+  WiFi.begin("sam_zhang", "aaabbb1234");
   Serial.println("Starting Wifi");
+
+  int retryCount = 0;
+
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
+    retryCount++;
+
+    if (retryCount >= maxRetries) {
+      Serial.println("\nWiFi connection failed. Restarting ESP...");
+      return ESP_FAIL;
+    }
   }
-  Serial.println("");
-  Serial.println("WiFi connected");
+
+  Serial.println("\nWiFi connected");
+  return ESP_OK;
+}
+
+esp_err_t connect_to_websocket() {
   Serial.println("Connecting to websocket");
-  client.onMessage(onMessageCallback);
-  bool connected = client.connect(url);
-  if (!connected) {
-    Serial.println("Cannot connect to websocket server!");
-    state = 3;
-    return ESP_FAIL;
-  }
-  if (state == 3) {
-    return ESP_FAIL;
+
+  bool connected = client.connect(WEBSOCKET_URL);
+
+  while (!connected) {
+    delay(500);
+    Serial.print(".");
+    connected = client.connect(WEBSOCKET_URL);
   }
 
   Serial.println("Websocket Connected!");
-  // client.send("deviceId"); // for verification
   return ESP_OK;
-};
+}
+
 
 void setup_lcd() {
   
@@ -129,9 +142,13 @@ void setup() {
   Serial.begin(9600);
 
   Serial.setDebugOutput(true);
-  init_wifi();
 
-  // attachInterrupt(APDS9960_INT, interruptRoutine, FALLING);
+  if (init_wifi() == ESP_FAIL) {
+    ESP.restart();
+  };
+
+  connect_to_websocket();
+
   //setting up lcd
   setup_lcd();
   //setting up the apds sensor
@@ -149,11 +166,18 @@ void setup() {
 
 void loop() {
 
-  client.poll();
+  if (!client.available()) {
+    connect_to_websocket();
+  } else {
+    client.poll();
+  }
 
   if(timer_has_run_out) {
     Serial.println("Timer has run out");
-    client.send("Timer has run out");
+    //client.send("Timer ran out");
+    lcd.clear();
+    lcd.setCursor(0,0);
+    lcd.print("Timer ran out");
     button_pressed = false;
     timer_has_run_out = false;
   }
@@ -170,13 +194,15 @@ void loop() {
   }
 
   if(button_pressed) {
+    //create the countdown
+    int64_t time_passed = (esp_timer_get_time()-start_time)/1000000; 
+    lcd.setCursor(0,1);
+    lcd.print(String(time_passed));
 
-      handleGesture();
+    handleGesture();
 
-      //create the countdown
-      int64_t time_passed = (esp_timer_get_time()-start_time)/1000000; 
-      lcd.setCursor(0,1);
-      lcd.print(String(time_passed));
+      
+      
       
   } else {
     //Serial.println("Button not activated yet");
